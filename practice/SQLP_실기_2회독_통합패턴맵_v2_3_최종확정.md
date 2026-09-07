@@ -79,7 +79,7 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 Plan/징후 | Cardinality/진단 포인트 | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|---|
-| C01 | 단계별 결과 건수 계산 | S | A | 각 Row Source의 입력→필터→조인→집계 결과 흐름을 계산한다 | 모든 Plan | A-Rows 흐름, 입력/출력 건수 | SQL/Plan을 위에서 아래가 아니라 데이터 흐름 기준으로 판독 | 필수 반복 | 숙달 (2026-08-16) |
+| C01 | 단계별 결과 건수 계산 | S | A | 각 Row Source의 입력→필터→조인→집계 결과 흐름을 계산한다 | 모든 Plan | A-Rows 흐름, 입력/출력 건수 | SQL/Plan을 위에서 아래가 아니라 데이터 흐름 기준으로 판독 | 필수 반복 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — Buffers 누적 규칙 미인지로 병목 Id 지목 실패(4문항 전부), 단계별 A-Rows 흐름 미작성 |
 | C02 | 선택도(Selectivity) | S | A | 조건이 전체 중 몇 %를 남기는지가 접근/조인 방식 선택의 핵심 | Filter/Access Predicate | 조건 후 A-Rows | 조건식·통계·인덱스 재검토 | 필수 | 숙달 (2026-08-16) |
 | C03 | NDV 기반 등치조건 추정 | A | B | 균등분포 가정 시 등치조건 선택도는 NDV와 연관 | E-Rows 괴리 | NDV, 분포 왜곡 | 통계/히스토그램 검토 | 보강 | 숙달 (2026-08-31) |
 | C04 | 범위조건 Cardinality | A | B | BETWEEN, >, < 범위는 값 분포와 경계에 따라 건수 결정 | INDEX RANGE SCAN/FTS | 범위 폭과 실제 분포 | 범위조건 재작성/통계 검토 | 보강 | 미평가 |
@@ -88,7 +88,7 @@
 | C07 | Anti Join Cardinality | S | A | NOT EXISTS는 매칭되지 않는 외부 행만 반환 | HASH/NL ANTI | 제거 비율 | Anti Join 변환 검토 | 필수 | 미평가 |
 | C08 | GROUP BY 입출력 건수 | S | A | 입력행 수와 그룹 NDV가 출력행 수를 결정 | HASH/SORT GROUP BY | 그룹키 NDV | 선집계/후집계 위치 판단 | 필수 | 미평가 |
 | C09 | DISTINCT 전후 건수 | S | A | 1:N 조인 증폭 후 DISTINCT가 중복 제거 비용을 만든다 | HASH UNIQUE/SORT UNIQUE | 증폭 건수와 최종 유일건수 | Semi Join/사전집계 등 구조 변경 | 필수 | 미평가 |
-| C10 | Top-N 결과 건수 | A | A | 전체 정렬/분석 전에 N건만 필요하면 Stopkey 가능성 | COUNT STOPKEY/SORT ORDER BY STOPKEY | N과 입력건수 | ROWNUM/FETCH/ROW_NUMBER 구조 점검 | 필수 | 미평가 |
+| C10 | Top-N 결과 건수 | A | A | 전체 정렬/분석 전에 N건만 필요하면 Stopkey 가능성 | COUNT STOPKEY/SORT ORDER BY STOPKEY | N과 입력건수 | ROWNUM/FETCH/ROW_NUMBER 구조 점검 | 필수 | 부분숙달 (2026-09-07) — Stopkey 구조 판단은 정확, 낭비율 분모를 최종 결과건수가 아닌 중간단계로 계산 |
 
 ## 2.2 Optimizer Statistics / 추정오류
 
@@ -109,7 +109,7 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 징후 | 진단 포인트 | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|---|
-| P01 | 컬럼 함수 가공 | S | A | `TRUNC(col)`, `TO_CHAR(col)` 등은 일반 B-tree 인덱스/프루닝 가용성을 약화할 수 있음 | FTS, FILTER | Access vs Filter Predicate | 범위식으로 재작성/FBI 검토 | 필수 | 숙달 (2026-09-06) |
+| P01 | 컬럼 함수 가공 | S | A | `TRUNC(col)`, `TO_CHAR(col)` 등은 일반 B-tree 인덱스/프루닝 가용성을 약화할 수 있음 | FTS, FILTER | Access vs Filter Predicate | 범위식으로 재작성/FBI 검토 | 필수 | 숙달 (2026-09-07) — TO_CHAR → 범위식 재작성 및 경계값(`<`) 처리 정확. 2일 연속 유지 |
 | P02 | 암묵적 형변환 | S | A | 데이터 타입 불일치가 컬럼 쪽 변환으로 귀결되면 인덱스 사용성과 추정이 악화될 수 있음 | INTERNAL_FUNCTION/TO_NUMBER 등 | Predicate Information | 타입 일치 | 필수 | 숙달 (2026-08-20) |
 | P03 | 날짜 등치 → 범위 재작성 | S | A | `TRUNC(dt)=:d` 대신 `dt>=:d AND dt<:d+1` 형태로 접근범위를 열 수 있음 | RANGE SCAN 가능 | 경계값 포함성 | 반개구간 사용 | 필수 | 숙달 (2026-08-20) |
 | P04 | NVL/DECODE/CASE 조건 | A | B | 선택조건을 표현식으로 감싸면 Index/OR-expansion 가능성이 달라짐 | FILTER/FTS | 호출 유형별 선택도 | 분기/OR-expansion 검토 | 보강 | 숙달 (2026-08-18) |
@@ -124,14 +124,14 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 Plan | 진단 포인트 | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|---|
-| A01 | TABLE ACCESS FULL | S | A | 전체/대량 범위에서는 FTS가 정상일 수 있으며 FTS 자체가 병목을 의미하지 않음 | TABLE ACCESS FULL | 읽을 필요가 있는 비율, Buffers | 선택도·파티션·병렬과 함께 판단 | 필수 | 미평가 |
+| A01 | TABLE ACCESS FULL | S | A | 전체/대량 범위에서는 FTS가 정상일 수 있으며 FTS 자체가 병목을 의미하지 않음 | TABLE ACCESS FULL | 읽을 필요가 있는 비율, Buffers | 선택도·파티션·병렬과 함께 판단 | 필수 | 취약 (2026-09-07, 오답일 2026-09-07) — "FULL이면 병목" 관성. Buffers 비중 0.5%인 TB_CLAIM을 병목으로 오지목 |
 | A02 | INDEX UNIQUE SCAN | A | A | Unique/PK 전체키 등치 탐색 시 단건 접근 | INDEX UNIQUE SCAN | Starts와 1건성 | PK/UK 조건 검토 | 보강 | 미평가 |
 | A03 | INDEX RANGE SCAN | S | A | 선두키 조건과 범위에 따라 리프 구간 탐색 | INDEX RANGE SCAN | 스캔 엔트리 수 | 조건/컬럼순서 최적화 | 필수 | 미평가 |
 | A04 | INDEX FULL SCAN | B | B | 인덱스 순서를 유지하며 전체 리프를 순차 탐색 | INDEX FULL SCAN | 정렬 제거 가능성 | ORDER BY/커버링과 연계 | 개념+복합 | 미평가 |
 | A05 | INDEX FAST FULL SCAN | B | B | 인덱스를 멀티블록 방식으로 전체 읽되 정렬순서는 보장하지 않음 | INDEX FAST FULL SCAN | 테이블 대신 인덱스만 읽는 이점 | 커버링 여부 | 개념 | 미평가 |
 | A06 | INDEX SKIP SCAN | B | C | 선두키 NDV가 낮을 때 비선두 조건으로 반복 탐색 가능 | INDEX SKIP SCAN | 선두 NDV/반복 수 | 새 인덱스와 비용 비교 | 개념 | 미평가 |
 | A07 | INDEX MIN/MAX SCAN | B | C | 적절한 인덱스에서 MIN/MAX를 극소 범위로 처리 | INDEX FULL SCAN (MIN/MAX) | 집계 입력 최소화 | 인덱스 활용 | 개념 | 미평가 |
-| A08 | Descending Index Scan | B | C | 정렬 방향과 인덱스 순서를 이용해 정렬 생략 가능 | INDEX RANGE SCAN DESCENDING | ORDER BY 방향 | 인덱스/Top-N 결합 | 개념 | 미평가 |
+| A08 | Descending Index Scan | B | C | 정렬 방향과 인덱스 순서를 이용해 정렬 생략 가능 | INDEX RANGE SCAN DESCENDING | ORDER BY 방향 | 인덱스/Top-N 결합 | 개념 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — 09-06에 교정한 INDEX_DESC 누락이 09-07 첫 제출에서 재발. 지적 후 자력 교정 |
 | A09 | TABLE ACCESS BY INDEX ROWID | S | A | 인덱스에서 얻은 ROWID로 테이블 블록을 방문 | TABLE ACCESS BY INDEX ROWID | 방문건수·클러스터링 | 커버링/선택도 검토 | 필수 | 미평가 |
 | A10 | Batched ROWID Access | C | C | ROWID 방문을 묶어 블록 접근 효율을 높이는 실행 형태 | TABLE ACCESS BY INDEX ROWID BATCHED | 버전/Plan 형태 | 개념 확인 | 저우선 | 미평가 |
 | A11 | Bitmap Index Access | B | C | 낮은 NDV 다중조건 분석형 환경에서 비트연산이 유리할 수 있음 | BITMAP INDEX ... | DML 동시성 주의 | OLTP 여부 판단 | 개념 | 미평가 |
@@ -141,9 +141,9 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 진단 포인트 | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|
-| I01 | 복합인덱스 컬럼 순서 | S | A | 등치/범위, 선택도, 정렬, 조인조건을 종합해 선두/후행 컬럼을 정함 | Access Predicate 범위 | 인덱스 재설계 | 필수 | 부분숙달 (2026-09-03, 오답일 2026-09-03) — 조인통로 인덱스 선두에 조인키(BRANCH_CD) 누락, 필터키(STAT_CD) 선두 배치 오류 |
+| I01 | 복합인덱스 컬럼 순서 | S | A | 등치/범위, 선택도, 정렬, 조인조건을 종합해 선두/후행 컬럼을 정함 | Access Predicate 범위 | 인덱스 재설계 | 필수 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — 조인통로(NL inner)=조인키 선두 규칙은 문제3에서 정확. 그러나 단독 범위스캔 커버링=범위키 선두와의 분별 미완, 문제2에서 (SALE_DT,CUST_ID) 오설계 |
 | I02 | 선두컬럼 부재 | S | A | 선두키 조건이 없으면 일반 Range Scan 효율이 떨어질 수 있음 | Skip/Full/FTS | 호출 조건 | 새 인덱스/Skip 비교 | 필수 | 미평가 |
-| I03 | 커버링 인덱스 | A | B | 필요한 컬럼을 인덱스에서 모두 해결하면 ROWID 테이블 접근 제거 가능 | Table Access 제거 | 인덱스 크기/쓰기비용 | 포함 컬럼 검토 | 보강 | 미평가 |
+| I03 | 커버링 인덱스 | A | B | 필요한 컬럼을 인덱스에서 모두 해결하면 ROWID 테이블 접근 제거 가능 | Table Access 제거 | 인덱스 크기/쓰기비용 | 포함 컬럼 검토 | 보강 | 취약 (2026-09-07, 오답일 2026-09-07) — 집계 컬럼(SALE_AMT) 미포함 인덱스를 강제해 500만 건 테이블 랜덤 액세스 유발 |
 | I04 | Clustering Factor | A | B | 인덱스 순서와 테이블 블록 배치 상관이 ROWID 방문 비용에 영향 | Range Scan 비용 | CF vs blocks/rows | FTS와 비교 | 보강 | 미평가 |
 | I05 | 인덱스 선택도 한계 | S | A | 결과 건수가 많으면 인덱스가 있어도 FTS가 더 나을 수 있음 | INDEX 강제 시 Buffers 증가 | 필터 후 건수 | 무조건 INDEX 금지 | 필수 | 미평가 |
 | I06 | 중복/유사 인덱스 | B | C | 과도한 인덱스는 DML/공간/관리비용 증가 | DML 비용 | 컬럼 prefix 중복 | 통합/삭제 검토 | 개념 | 미평가 |
@@ -157,13 +157,13 @@
 | J01 | Nested Loops | S | A | Outer에서 나온 각 행에 대해 Inner Row Source를 반복 실행. Inner 인덱스는 흔한 효율화 수단이지 절대 필수는 아님 | NESTED LOOPS | Outer A-Rows, Inner Starts, Inner 1회 비용 | LEADING/USE_NL, Access 개선 | 필수 | 숙달 (2026-08-16) |
 | J02 | Hash Join | S | A | 한 입력으로 해시 구조를 만들고 다른 입력을 probe하여 대량 등치조인 처리 | HASH JOIN | build/probe 크기, 메모리/Temp | USE_HASH, 선필터 | 필수 | 숙달 (2026-08-16) |
 | J03 | Merge Join | A | A | 조인키 순서가 필요한 두 입력을 병합. 비등치/정렬활용 상황도 고려 | MERGE JOIN | SORT JOIN 존재 여부 | USE_MERGE | 보강 | 미평가 |
-| J04 | Join Order / Driving | S | A | 앞 단계에서 얼마나 줄이는지가 후속 Starts/입력건수에 연쇄 영향 | LEADING order | 각 단계 A-Rows | LEADING/ORDERED 신중 사용 | 필수 | 부분숙달 (2026-09-06, 오답일 2026-09-06) — Driving 선정은 완벽하나 조인통로 인덱스 선두 조인키 누락 재발 |
+| J04 | Join Order / Driving | S | A | 앞 단계에서 얼마나 줄이는지가 후속 Starts/입력건수에 연쇄 영향 | LEADING order | 각 단계 A-Rows | LEADING/ORDERED 신중 사용 | 필수 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — 드라이빙 선정은 2일 연속 정확. 조인통로 인덱스 선두 조인키 누락이 09-06에 이어 **2일 연속 재발**, 손익분기(안쪽 블록수 ÷ 4) 미적용 |
 | J05 | Hash Build/Probe 판단 | A | B | 일반적으로 작은 쪽 build가 유리하나 메모리·통계·변환에 따라 실제 역할 확인 필요 | HASH JOIN children | 입력 크기 | 조인순서/선필터 | 보강 | 미평가 |
 | J06 | Outer Join | S | A | 보존측 행을 유지하므로 필터 위치 변경 시 결과집합이 변할 수 있음 | HASH/NL OUTER | ON vs WHERE | 결과동일성 검증 | 필수 | 미평가 |
-| J07 | Semi Join | S | A | 존재만 필요하면 내부 중복을 외부 결과에 증폭시키지 않음 | HASH/NL SEMI | 일반 Join+DISTINCT와 비교 | EXISTS/IN, HASH_SJ 등 | 필수 | 숙달 (2026-09-06) — EXISTS 세미 관계 유지 및 1:N 증폭 제거 완벽 |
-| J08 | Anti Join | S | A | 부재 조건을 조인으로 처리해 반복 FILTER를 줄일 수 있음 | HASH/NL ANTI | NOT EXISTS Starts | HASH_AJ/NL_AJ 등 | 필수 | 미평가 |
+| J07 | Semi Join | S | A | 존재만 필요하면 내부 중복을 외부 결과에 증폭시키지 않음 | HASH/NL SEMI | 일반 Join+DISTINCT와 비교 | EXISTS/IN, HASH_SJ 등 | 필수 | 취약 (2026-09-07, 오답일 2026-09-07) — 09-06 독립해결(90점)이 하루 만에 롤백. 존재성 판정 실패로 일반 조인을 유지한 채 DISTINCT만 제거해 결과집합 파괴(10,800 → 150,000건) |
+| J08 | Anti Join | S | A | 부재 조건을 조인으로 처리해 반복 FILTER를 줄일 수 있음 | HASH/NL ANTI | NOT EXISTS Starts | HASH_AJ/NL_AJ 등 | 필수 | 취약 (2026-09-07, 오답일 2026-09-07) — NL_AJ 오선택. 탈 인덱스 부재 + 손익분기 위반(바깥 30,000 > 안쪽 3,200블록) |
 | J09 | Cartesian Join | A | B | 조인조건 누락 또는 의도적 조합으로 곱집합 발생 | MERGE JOIN CARTESIAN | 급격한 A-Rows 증가 | 조인조건 검증 | 보강 | 미평가 |
-| J10 | 1:N 증폭 | S | A | 다측과 일반 Join하면 기준 엔터티가 중복 출력될 수 있음 | Join 후 rows 급증 | 관계/PK-FK | Semi/집계/Distinct 필요성 판단 | 필수 | 숙달 (2026-09-01) |
+| J10 | 1:N 증폭 | S | A | 다측과 일반 Join하면 기준 엔터티가 중복 출력될 수 있음 | Join 후 rows 급증 | 관계/PK-FK | Semi/집계/Distinct 필요성 판단 | 필수 | 취약 (2026-09-07, 오답일 2026-09-07) — 고객당 12.5건 증폭 미인지. DISTINCT 제거의 선행조건(증폭 제거)을 적용하지 못함 |
 | J11 | Join Predicate 누락 | S | A | 상관/조인 조건 누락은 결과집합 자체를 변경 | FILTER/Cartesian/과대건수 | SQL 논리 | 조건 복원 | 필수 | 미평가 |
 | J12 | Join Method 강제의 함정 | A | A | USE_NL/HASH만으로 좋은 계획이 보장되지 않으며 Access/Order와 함께 결정 | Hint 적용 후 비효율 | 데이터량/접근비용 | 최소 힌트 | 보강 | 미평가 |
 
@@ -172,7 +172,7 @@
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 Plan/징후 | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|
 | Q01 | Correlated Subquery FILTER | S | A | 외부행마다 서브쿼리가 반복 실행되면 Starts가 커질 수 있음 | FILTER + Inner Starts | Unnest/Semi/Anti/Join 변환 검토 | 필수 | 숙달 (2026-09-03) — 스칼라 서브쿼리 8,000회 반복 구동 진단 정확 |
-| Q02 | Subquery Unnesting | S | A | 서브쿼리 QB를 조인 가능한 형태로 변환하여 Join Method 선택 폭을 넓힘. 항상 Semi Join이 되는 것은 아님 | SEMI/ANTI/일반 JOIN 등 | UNNEST/NO_UNNEST, 결과동일성 | 필수 | 숙달 (2026-09-06) — UNNEST NL_SJ 힌트 스스로 보완하여 완벽 달성 |
+| Q02 | Subquery Unnesting | S | A | 서브쿼리 QB를 조인 가능한 형태로 변환하여 Join Method 선택 폭을 넓힘. 항상 Semi Join이 되는 것은 아님 | SEMI/ANTI/일반 JOIN 등 | UNNEST/NO_UNNEST, 결과동일성 | 필수 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — UNNEST 시 LEADING에 서브Q 포함은 유지. 그러나 전환 후 조인 방식(NL_AJ) 선택 오류로 09-06 숙달에서 하향 |
 | Q03 | Scalar Subquery 반복 | S | A | 외부행마다 단일값 서브쿼리가 반복되어 Starts 증가 가능 | SCALAR SUBQUERY/FILTER | Join/사전집계로 변환 | 필수 | 부분숙달 (2026-09-03, 오답일 2026-09-03) — 조인 변환 구조는 도출, 지표 2개 중 1개 소실(결과집합 왜곡) |
 | Q04 | Scalar Subquery Caching | B | C | 동일 키 반복 시 캐싱 효과가 있을 수 있어 Starts/비용을 단순 외부건수와 동일시하면 안 됨 | 실제 Starts 관찰 | 실제 Plan statistics 확인 | 개념 | 미평가 |
 | Q05 | View Merge | A | B | 뷰 경계를 제거해 조인순서·Predicate 최적화 범위를 넓힐 수 있음 | VIEW 제거 | MERGE/NO_MERGE | 보강 | 미평가 |
@@ -216,9 +216,9 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 Plan | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|
-| O01 | SORT ORDER BY | A | A | 정렬 입력 건수와 메모리/Temp가 비용 결정 | SORT ORDER BY | 입력 축소/인덱스 순서 활용 | 필수 | 숙달 (2026-09-06) — INDEX_DESC 스캔 방향 일치 완벽 |
+| O01 | SORT ORDER BY | A | A | 정렬 입력 건수와 메모리/Temp가 비용 결정 | SORT ORDER BY | 입력 축소/인덱스 순서 활용 | 필수 | 숙달 (2026-09-07) — 인덱스 순서를 이용한 SORT ORDER BY 완전 생략. 2일 연속 유지 |
 | O02 | SORT UNIQUE | S | A | 정렬 기반 중복 제거 | SORT UNIQUE | 중복 발생 원인 제거 | 필수 | 숙달 (2026-08-19) |
-| O03 | HASH UNIQUE | S | A | 해시 기반 중복 제거 | HASH UNIQUE | Join 증폭 여부 | 필수 | 숙달 (2026-08-19) |
+| O03 | HASH UNIQUE | S | A | 해시 기반 중복 제거 | HASH UNIQUE | Join 증폭 여부 | 필수 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — HASH UNIQUE 제거 방향은 정확하나, 증폭 제거를 선행하지 않고 DISTINCT만 삭제 |
 | O04 | UNION vs UNION ALL | A | B | UNION은 중복제거 비용, UNION ALL은 그대로 결합 | SORT/HASH UNIQUE | 중복 제거 필요성 | 보강 | 미평가 |
 | O05 | SORT JOIN | A | B | Merge Join을 위한 정렬 | SORT JOIN | 기존 정렬 활용 여부 | 보강 | 미평가 |
 | O06 | Temp Spill | A | B | 정렬/해시가 메모리를 넘으면 Temp I/O 발생 | TempSpc/OMem/1Mem | 입력 축소/PGA/방법 변경 | 보강 | 숙달 (2026-08-19) |
@@ -227,14 +227,14 @@
 
 | ID | 패턴 | 중요도 | SQLP 근거 | 핵심 원리 | 대표 Plan | 대응 | 2회독 처리 | 숙련도 |
 |---|---|---|---|---|---|---|---|---|
-| G01 | HASH GROUP BY | S | A | 해시 기반 그룹 집계 | HASH GROUP BY | 입력·그룹수·메모리 | 선필터/선집계 | 필수 | 숙달 (2026-09-03) — 선집계 인라인 뷰 구조 도출 유지 |
+| G01 | HASH GROUP BY | S | A | 해시 기반 그룹 집계 | HASH GROUP BY | 입력·그룹수·메모리 | 선필터/선집계 | 필수 | 부분숙달 (2026-09-07, 오답일 2026-09-07) — 선집계 인라인 뷰 구조는 작성 가능하나 적용 조건 판단 실패 |
 | G02 | SORT GROUP BY | S | A | 정렬 기반 그룹 집계 | SORT GROUP BY | 정렬 필요성과 Temp | 인덱스/입력 축소 | 필수 | 미평가 |
-| G03 | GROUP BY 위치 | S | A | 조인 전/후 집계 위치가 중간건수와 결과 의미를 바꿈 | Group By child rows | 결과동일성 | 필수 | 숙달 (2026-08-18) |
+| G03 | GROUP BY 위치 | S | A | 조인 전/후 집계 위치가 중간건수와 결과 의미를 바꿈 | Group By child rows | 결과동일성 | 필수 | 취약 (2026-09-07, 오답일 2026-09-07) — 증폭 없는 구조(조인 전=조인 후 500만)에 선집계 오적용. 판별 공식 코칭 후 변형 미완 |
 | G04 | COUNT(*) vs COUNT(col) | A | B | NULL 포함 여부가 결과 의미를 바꿈 | Aggregate | NULL 의미 | 보강 | 미평가 |
 | G05 | Analytic WINDOW SORT | A | A | ROW_NUMBER 등 분석함수는 파티션/정렬 입력에 따라 비용 발생 | WINDOW SORT | 입력건수/partition by/order by | Top-N 구조 검토 | 필수 | 숙달 (2026-08-19) |
 | G06 | WINDOW NOSORT | A | A | 입력이 요구 순서를 이미 만족하면 정렬 생략 가능 | WINDOW NOSORT | 인덱스 순서 | 인덱스/Access 설계 | 보강 | 숙달 (2026-08-19) |
-| G07 | STOPKEY | S | A | 필요한 N건 이후 처리를 중단할 수 있으면 대량 불필요 처리 제거 | COUNT STOPKEY/SORT ... STOPKEY | N 이전에 정렬이 필요한지 | 쿼리 구조 수정 | 필수 | 숙달 (2026-08-18) |
-| G08 | ROWNUM Top-N | S | A | ORDER BY와 ROWNUM의 적용 순서가 결과를 결정 | STOPKEY | inline view 위치 | 결과동일성 검증 | 필수 | 숙달 (2026-08-18) |
+| G07 | STOPKEY | S | A | 필요한 N건 이후 처리를 중단할 수 있으면 대량 불필요 처리 제거 | COUNT STOPKEY/SORT ... STOPKEY | N 이전에 정렬이 필요한지 | 쿼리 구조 수정 | 필수 | 숙달 (2026-09-07) — Stopkey를 이용한 부분범위 처리 유도 정확 |
+| G08 | ROWNUM Top-N | S | A | ORDER BY와 ROWNUM의 적용 순서가 결과를 결정 | STOPKEY | inline view 위치 | 결과동일성 검증 | 필수 | 숙달 (2026-09-07) — inline view + ROWNUM 구조 및 ORDER BY 유지 정확 |
 | G09 | ROW_NUMBER Top-N | S | A | 그룹별 Top-N에 적합하지만 전체 Window 처리 여부 확인 | WINDOW SORT/NOSORT | PARTITION BY 단위 | 인덱스/Pushdown | 필수 | 숙달 (2026-08-19) |
 | G10 | FETCH FIRST | A | A | 12c+ Top-N 문법. 기본 원리는 Stopkey/정렬과 동일 | STOPKEY 계열 | 버전 범용성 | ROWNUM 대안도 숙지 | 보강 | 미평가 |
 
